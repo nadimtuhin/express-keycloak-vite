@@ -1,0 +1,13 @@
+{
+  "name": "kcdemo-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "jose": "^6.1.0"
+  }
+}
