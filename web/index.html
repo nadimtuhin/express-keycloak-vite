@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Keycloak + Express + Vite hello world</title>
+
+<h1>Keycloak + Express + Vite</h1>
+
+<p id="banner" data-testid="banner" hidden></p>
+
+<p>
+  Signed in as <b data-testid="whoami">anonymous</b>
+  — roles: <span data-testid="roles">[]</span>
+  <!-- enabled once keycloak.init() resolves, so clicking can never silently do nothing -->
+  <button id="login" data-testid="login" disabled>Log in</button>
+  <button id="logout" data-testid="logout">Log out</button>
+</p>
+
+<section>
+  <button id="call-public" data-testid="call-public">GET /api/public</button>
+  <pre data-testid="public-result"></pre>
+</section>
+
+<section>
+  <button id="call-user" data-testid="call-user">GET /api/user</button>
+  <pre data-testid="user-result"></pre>
+</section>
+
+<section>
+  <button id="call-admin" data-testid="call-admin">GET /api/admin</button>
+  <pre data-testid="admin-result"></pre>
+</section>
+
+<script type="module" src="/src/main.js"></script>
