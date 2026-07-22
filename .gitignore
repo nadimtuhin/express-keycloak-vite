@@ -1,0 +1,9 @@
+node_modules/
+e2e/test-results/
+e2e/playwright-report/
+.omc/
+.omx/
+
+# This demo's .env holds only fake localhost credentials and IS meant to be committed —
+# `docker compose up` needs it. Overrides the global ~/.gitignore_global rule.
+!.env

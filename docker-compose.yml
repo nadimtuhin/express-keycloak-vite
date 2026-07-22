@@ -1,0 +1,100 @@
+# Every service joins the `net` container's network namespace, so `localhost:8080` / `:3000` /
+# `:5173` mean the same thing on the host and inside every container. That's what lets one URL
+# scheme work for the host browser AND the containerised e2e browser.
+#
+# `net` exists only to own that namespace. Keycloak must NOT own it: recreating or stopping the
+# owner strands every dependent container on a dead namespace (they can still reach each other,
+# but the published ports move to the new sandbox and the host sees nothing). The outage e2e
+# specs stop Keycloak on purpose, so the owner has to be something that never changes.
+#
+# Cost: only `net` may publish ports, and services cannot reach each other by container name.
+services:
+  net:
+    image: alpine:3.22
+    container_name: kcdemo-net
+    command: sleep infinity
+    ports:
+      - "8080:8080"   # keycloak
+      - "3000:3000"   # api
+      - "5173:5173"   # web
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.0
+    container_name: kcdemo-keycloak
+    command: ["start-dev", "--import-realm"]
+    network_mode: "service:net"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_HOSTNAME: ${KC_HOSTNAME}          # without this, `iss` is derived from request headers
+      KC_HEALTH_ENABLED: ${KC_HEALTH_ENABLED}
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    # ponytail: the image ships neither curl nor wget; bash /dev/tcp is what's actually there.
+    # Hitting /realms/demo (not /health/ready) also proves --import-realm finished.
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080; printf 'GET /realms/demo HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '\"realm\":\"demo\"' <&3"]
+      interval: 5s
+      retries: 40
+      start_period: 60s
+
+  api:
+    image: node:22-alpine
+    container_name: kcdemo-api
+    working_dir: /app
+    network_mode: "service:net"
+    command: sh -c "npm i && npm start"
+    environment:
+      KC_ISSUER: ${KC_ISSUER}
+      KC_JWKS_URL: ${KC_ISSUER}/protocol/openid-connect/certs
+    volumes:
+      - ./server:/app
+      - api_modules:/app/node_modules   # keeps root-owned node_modules out of the host tree
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    # without this, `--wait` calls a container still 60s into `npm i` ready
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- localhost:3000/api/public || exit 1"]
+      interval: 5s
+      retries: 40
+      start_period: 30s
+
+  web:
+    image: node:22-alpine
+    container_name: kcdemo-web
+    working_dir: /app
+    network_mode: "service:net"
+    command: sh -c "npm i && npm run dev -- --host"
+    env_file: .env
+    volumes:
+      - ./web:/app
+      - web_modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- localhost:5173 || exit 1"]
+      interval: 5s
+      retries: 40
+      start_period: 30s
+
+  e2e:
+    build: ./e2e
+    working_dir: /e2e
+    network_mode: "service:net"
+    profiles: ["test"]
+    command: sh -c "npm i && npx playwright test"
+    volumes:
+      - ./e2e:/e2e
+      - e2e_modules:/e2e/node_modules
+      # root-equivalent control of the docker daemon — fine locally, never in CI.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  api_modules:
+  web_modules:
+  e2e_modules:
