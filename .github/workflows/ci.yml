@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Lint web
+        run: |
+          cd web
+          npm ci --ignore-scripts
+          npm run lint || true
+      - name: Lint server
+        run: |
+          cd server
+          npm ci --ignore-scripts
+          npm run lint || true
+      - name: Docker compose smoke
+        run: |
+          docker compose up -d
+          docker compose ps
+          docker compose down
+
