@@ -47,6 +47,7 @@ services:
     environment:
       KC_ISSUER: ${KC_ISSUER}
       KC_JWKS_URL: ${KC_ISSUER}/protocol/openid-connect/certs
+      KC_CLIENT_ID: ${VITE_KC_CLIENT}      # tokens must have azp == this client
     volumes:
       - ./server:/app
       - api_modules:/app/node_modules   # keeps root-owned node_modules out of the host tree
