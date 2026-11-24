@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { bearer, hasRole, mapAuthError } from './auth.js'
+import { bearer, hasRole, isAccessTokenFor, mapAuthError } from './auth.js'
 
 test('bearer', () => {
   assert.equal(bearer(undefined), null)
@@ -40,4 +40,26 @@ test('mapAuthError', () => {
 
   assert.deepEqual(mapAuthError(new Error('boom')), { status: 500, code: 'internal' })
   assert.deepEqual(mapAuthError(null), { status: 500, code: 'internal' })
+})
+
+test('mapAuthError: JWKS endpoint up but not serving keys is an outage, not a bad token', () => {
+  // jose throws a generic JOSEError when the JWKS answers non-200 (e.g. Keycloak 502/503 while
+  // booting, or the realm is missing) or returns something that isn't JSON.
+  const generic = (msg) => Object.assign(new Error(msg), { code: 'ERR_JOSE_GENERIC' })
+  assert.deepEqual(mapAuthError(generic('Expected 200 OK from the JSON Web Key Set HTTP response')),
+    { status: 503, code: 'keycloak_unreachable' })
+  assert.deepEqual(mapAuthError(generic('Failed to parse the JSON Web Key Set HTTP response as JSON')),
+    { status: 503, code: 'keycloak_unreachable' })
+})
+
+test('isAccessTokenFor: only access tokens issued to our client are accepted', () => {
+  assert.equal(isAccessTokenFor({ typ: 'Bearer', azp: 'web-app' }, 'web-app'), true)
+  // same realm, different client (e.g. admin-cli password grant) — must not pass
+  assert.equal(isAccessTokenFor({ typ: 'Bearer', azp: 'admin-cli' }, 'web-app'), false)
+  // ID tokens are RS256-signed by the same realm key with the same `iss`
+  assert.equal(isAccessTokenFor({ typ: 'ID', azp: 'web-app' }, 'web-app'), false)
+  assert.equal(isAccessTokenFor({ azp: 'web-app' }, 'web-app'), false)
+  assert.equal(isAccessTokenFor({ typ: 'Bearer' }, 'web-app'), false)
+  assert.equal(isAccessTokenFor(null, 'web-app'), false)
+  assert.equal(isAccessTokenFor({ typ: 'Bearer', azp: undefined }, undefined), false)
 })
