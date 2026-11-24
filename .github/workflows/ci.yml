@@ -15,19 +15,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Lint web
-        run: |
-          cd web
-          npm ci --ignore-scripts
-          npm run lint || true
-      - name: Lint server
+      # No lint is configured in either package (see backlog/checks.sh), so there is no lint step:
+      # the old `npm run lint || true` always "passed" by swallowing "Missing script: lint".
+      - name: Server unit tests
         run: |
           cd server
           npm ci --ignore-scripts
-          npm run lint || true
-      - name: Docker compose smoke
+          npm test
+      - name: Web build
         run: |
-          docker compose up -d
-          docker compose ps
-          docker compose down
-
+          cd web
+          npm ci --ignore-scripts
+          npm run build
+      - name: Dependency audit
+        run: |
+          (cd server && npm audit --audit-level=high)
+          (cd web && npm audit --audit-level=high)
+      # --wait blocks on every healthcheck (realm imported, api and web answering), so this fails
+      # if the stack doesn't actually come up. The e2e service is NOT run here: it mounts
+      # docker.sock, which the README says must never run in CI.
+      - name: Compose up
+        run: docker compose up -d --wait
+      - name: Endpoint x principal matrix
+        run: bash backlog/curl-matrix.sh
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Compose down
+        if: always()
+        run: docker compose down -v

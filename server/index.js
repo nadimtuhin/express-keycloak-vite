@@ -1,9 +1,9 @@
 import express from 'express'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
-import { bearer, hasRole, mapAuthError } from './auth.js'
+import { bearer, hasRole, isAccessTokenFor, mapAuthError } from './auth.js'
 
-const { KC_ISSUER, KC_JWKS_URL, PORT = 3000 } = process.env
-for (const [k, v] of Object.entries({ KC_ISSUER, KC_JWKS_URL })) {
+const { KC_ISSUER, KC_JWKS_URL, KC_CLIENT_ID, PORT = 3000 } = process.env
+for (const [k, v] of Object.entries({ KC_ISSUER, KC_JWKS_URL, KC_CLIENT_ID })) {
   if (!v) { console.error(`FATAL: ${k} is not set`); process.exit(1) }
 }
 
@@ -14,6 +14,7 @@ const JWKS = createRemoteJWKSet(new URL(KC_JWKS_URL), { cacheMaxAge: 0, timeoutD
 const MESSAGES = {
   no_token: 'Missing Bearer token',
   malformed_token: 'Token could not be verified',
+  wrong_client: 'Token is not an access token issued to this client',
   expired_token: 'Token expired, refresh and retry',
   bad_issuer: 'Token issued by an unexpected issuer',
   missing_role: 'Insufficient role',
@@ -28,8 +29,9 @@ const requireAuth = (role) => async (req, res, next) => {
   if (!token) return fail(res, 401, 'no_token')
   try {
     const { payload } = await jwtVerify(token, JWKS, { issuer: KC_ISSUER, algorithms: ['RS256'] })
-    // ponytail: no `aud` check — single public client, Keycloak issues aud:"account".
-    // Add the `audience` option to jwtVerify before any multi-client use.
+    // No `aud` check (Keycloak issues aud:"account" here); `azp` + `typ` pin the token to our
+    // client instead, so other clients' tokens (e.g. admin-cli) and ID tokens are rejected.
+    if (!isAccessTokenFor(payload, KC_CLIENT_ID)) return fail(res, 401, 'wrong_client')
     if (!hasRole(payload, role)) return fail(res, 403, 'missing_role', `Requires realm role '${role}'`)
     req.user = payload
     next()

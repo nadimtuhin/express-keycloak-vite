@@ -55,8 +55,9 @@ Measured directly against the running stack, not inferred.
 | `malformed_token`      | 401  | signature/claims invalid, not expired |
 | `expired_token`        | 401  | token past `exp` |
 | `bad_issuer`           | 401  | `iss` doesn't match `KC_ISSUER` |
+| `wrong_client`         | 401  | valid signature/issuer, but not an access token (`typ: Bearer`) for `KC_CLIENT_ID` (`azp`) |
 | `missing_role`         | 403  | valid token, lacks the required realm role |
-| `keycloak_unreachable` | 503  | JWKS fetch fails (network error or timeout) |
+| `keycloak_unreachable` | 503  | JWKS fetch fails (network error, timeout, non-200 or non-JSON response) |
 | `not_found`            | 404  | unknown route |
 | `internal`             | 500  | anything unclassified |
 
@@ -66,7 +67,7 @@ Every response is `{"error": <code>, "message": <human string>}`.
 
 ```bash
 bash backlog/checks.sh              # fast: server unit tests only, no docker
-CHECKS_FULL=1 bash backlog/checks.sh  # + compose up --wait, a curl matrix over 4 principals x 3 endpoints, and the e2e suite
+CHECKS_FULL=1 bash backlog/checks.sh  # + compose up --wait, a curl matrix over 5 principals x 3 endpoints, and the e2e suite
 ```
 
 Or run just the e2e suite (Playwright, in its own container):
@@ -104,10 +105,13 @@ with the volume dropped and every user/session is gone. Also: Keycloak's `--impo
 the import if a realm with that name already exists, which bites people who add a Postgres volume
 without also handling re-import (see Troubleshooting).
 
-**No `aud` check**. `jwtVerify` checks `issuer` and `algorithms: ['RS256']` only, not audience.
-Cost: this is only safe because there is exactly one public client (`web-app`) and Keycloak's
-default `aud` is `"account"` for it. Add an `audience` option to `jwtVerify` before introducing a
-second client — otherwise a token minted for a different client would still pass verification here.
+**No `aud` check; `azp` + `typ` instead**. `jwtVerify` checks `issuer` and `algorithms: ['RS256']`,
+then the API requires `typ: "Bearer"` and `azp` equal to `KC_CLIENT_ID` (`web-app`). Keycloak
+signs every client's tokens, and ID tokens, with the same realm key and `iss`, so without this a
+token minted for another client in the realm (e.g. a password grant against the built-in
+`admin-cli` client) or an ID token would pass. Cost: `aud` is still not checked — Keycloak's
+default `aud` is `"account"` here; add an audience mapper and the `audience` option to `jwtVerify`
+if this API ever needs to accept tokens from more than one client.
 
 **`checkLoginIframe: false`** in `keycloak.init()`. Without it, `updateToken()` waits on a hidden
 Keycloak iframe that never answers when Keycloak is down, so the request hung forever instead of
@@ -142,7 +146,7 @@ This is a hello-world demo. Deliberately missing:
 - **HTTPS** — everything is plain HTTP on `localhost`.
 - **Real secrets** — `.env` ships an admin password of `admin` and demo user passwords equal to
   their usernames, committed in the repo.
-- **`aud` validation** — see above; required once there's more than one client.
+- **`aud` validation** — see above (`azp` is checked); needed once more than one client calls the API.
 - **Production Keycloak start mode** — `start-dev`, not `start` (dev mode disables some hardening
   and is explicitly unsupported for production by Keycloak).
 - **`docker.sock` mounted into the `e2e` service** — grants that container root-equivalent
